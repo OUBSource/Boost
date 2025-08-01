@@ -1,12 +1,14 @@
 import os
 import re
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, request, session, jsonify
+from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # Инициализация приложения
 app = Flask(__name__)
+CORS(app, supports_credentials=True, origins=['http://localhost:8000', 'http://127.0.0.1:8000'])
 app.secret_key = os.urandom(24)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///boost_messenger.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -48,96 +50,73 @@ def is_valid_password(password):
 
 # Templates are now in separate files in the templates/ directory
 
-# Маршруты приложения
-@app.route('/')
-def home():
+# API Routes
+@app.route('/check_auth')
+def check_auth():
     if 'user_id' in session:
-        return redirect(url_for('chat'))
-    return redirect(url_for('login'))
+        user = User.query.get(session['user_id'])
+        if user:
+            return jsonify({
+                'authenticated': True,
+                'username': user.username
+            })
+    return jsonify({'authenticated': False})
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login', methods=['POST'])
 def login():
     if 'user_id' in session:
-        return redirect(url_for('chat'))
+        return jsonify({'status': 'success', 'message': 'Already logged in'})
     
-    if request.method == 'POST':
-        username = request.form['username'].strip()
-        password = request.form['password'].strip()
-        
-        user = User.query.filter_by(username=username).first()
-        
-        if not user or not check_password_hash(user.password_hash, password):
-            flash('Неверное имя пользователя или пароль', 'danger')
-            return redirect(url_for('login'))
-        
-        session.permanent = True
-        session['user_id'] = user.id
-        session['username'] = user.username
-        user.online = True
-        user.last_seen = datetime.utcnow()
-        db.session.commit()
-        
-        return redirect(url_for('chat'))
+    username = request.form['username'].strip()
+    password = request.form['password'].strip()
     
-    return render_template('login.html')
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if 'user_id' in session:
-        return redirect(url_for('chat'))
+    user = User.query.filter_by(username=username).first()
     
-    if request.method == 'POST':
-        username = request.form['username'].strip()
-        password = request.form['password'].strip()
-        confirm_password = request.form['confirm_password'].strip()
-        
-        if not is_valid_username(username):
-            flash('Имя пользователя должно быть от 3 до 20 символов и не содержать пробелов', 'danger')
-            return redirect(url_for('register'))
-        
-        if not is_valid_password(password):
-            flash('Пароль должен быть от 5 до 50 символов и не содержать пробелов', 'danger')
-            return redirect(url_for('register'))
-        
-        if password != confirm_password:
-            flash('Пароли не совпадают', 'danger')
-            return redirect(url_for('register'))
-        
-        existing_user = User.query.filter_by(username=username).first()
-        if existing_user:
-            flash('Это имя пользователя уже занято', 'danger')
-            return redirect(url_for('register'))
-        
-        new_user = User(
-            username=username,
-            password_hash=generate_password_hash(password),
-            online=True,
-            last_seen=datetime.utcnow()
-        )
-        
-        db.session.add(new_user)
-        db.session.commit()
-        
-        flash('Регистрация прошла успешно! Теперь вы можете войти.', 'success')
-        return redirect(url_for('login'))
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({'status': 'error', 'message': 'Неверное имя пользователя или пароль'}), 401
     
-    return render_template('register.html')
-
-@app.route('/chat')
-def chat():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
-    # Обновляем статус пользователя
-    user = User.query.get(session['user_id'])
+    session.permanent = True
+    session['user_id'] = user.id
+    session['username'] = user.username
     user.online = True
     user.last_seen = datetime.utcnow()
     db.session.commit()
     
-    # Получаем сообщения
-    messages = Message.query.order_by(Message.timestamp.asc()).all()
+    return jsonify({'status': 'success', 'message': 'Login successful'})
+
+@app.route('/register', methods=['POST'])
+def register():
+    if 'user_id' in session:
+        return jsonify({'status': 'error', 'message': 'Already logged in'}), 400
     
-    return render_template('chat.html', messages=messages)
+    username = request.form['username'].strip()
+    password = request.form['password'].strip()
+    confirm_password = request.form['confirm_password'].strip()
+    
+    if not is_valid_username(username):
+        return jsonify({'status': 'error', 'message': 'Имя пользователя должно быть от 3 до 20 символов и не содержать пробелов'}), 400
+    
+    if not is_valid_password(password):
+        return jsonify({'status': 'error', 'message': 'Пароль должен быть от 5 до 50 символов и не содержать пробелов'}), 400
+    
+    if password != confirm_password:
+        return jsonify({'status': 'error', 'message': 'Пароли не совпадают'}), 400
+    
+    existing_user = User.query.filter_by(username=username).first()
+    if existing_user:
+        return jsonify({'status': 'error', 'message': 'Это имя пользователя уже занято'}), 400
+    
+    new_user = User(
+        username=username,
+        password_hash=generate_password_hash(password),
+        online=True,
+        last_seen=datetime.utcnow()
+    )
+    
+    db.session.add(new_user)
+    db.session.commit()
+    
+    return jsonify({'status': 'success', 'message': 'Регистрация прошла успешно! Теперь вы можете войти.'})
 
 @app.route('/send_message', methods=['POST'])
 def send_message():
@@ -191,7 +170,7 @@ def logout():
         
         session.clear()
     
-    return redirect(url_for('login'))
+    return jsonify({'status': 'success', 'message': 'Logged out successfully'})
 
 # Создаем папку для статических файлов, если её нет
 if not os.path.exists('static'):

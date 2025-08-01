@@ -50,7 +50,7 @@ function addMessage(message, isAuthor) {
 
 // Загрузка сообщений
 function loadMessages() {
-    fetch('/get_messages')
+    fetch(`${API_BASE_URL}/get_messages`)
         .then(response => response.json())
         .then(data => {
             if (data.messages && data.messages.length > 0) {
@@ -73,7 +73,7 @@ function sendMessage() {
     const message = input.value.trim();
     
     if (message) {
-        fetch('/send_message', {
+        fetch(`${API_BASE_URL}/send_message`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -90,11 +90,8 @@ function sendMessage() {
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', function() {
-    // Загружаем сообщения при открытии страницы
-    loadMessages();
-    
     // Настройка отправки сообщений
-    const messageForm = document.querySelector('.input-group');
+    const messageForm = document.getElementById('message-form');
     if (messageForm) {
         messageForm.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -102,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         // Также отправка по нажатию Enter
-        const messageInput = document.querySelector('.message-input');
+        const messageInput = document.getElementById('message-input');
         messageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 sendMessage();
@@ -110,6 +107,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Проверка новых сообщений каждые 2 секунды
-    setInterval(loadMessages, 2000);
+    // Проверка новых сообщений каждые 2 секунды (only when chat is visible)
+    setInterval(() => {
+        if (document.getElementById('chat-interface').style.display !== 'none') {
+            loadMessages();
+        }
+    }, 2000);
 }); 
