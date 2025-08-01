@@ -1,18 +1,20 @@
 import os
 import re
-from datetime import datetime
-from flask import Flask, request, session, jsonify
+import jwt
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
 # Инициализация приложения
 app = Flask(__name__)
-CORS(app, supports_credentials=True, origins=['http://localhost:8000', 'http://127.0.0.1:8000'])
-app.secret_key = os.urandom(24)
+CORS(app, supports_credentials=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///boost_messenger.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['PERMANENT_SESSION_LIFETIME'] = 3600
+app.config['JWT_SECRET_KEY'] = 'boost-messenger-jwt-secret-2024'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 
 db = SQLAlchemy(app)
 
@@ -48,25 +50,59 @@ def is_valid_password(password):
         return False
     return True
 
-# Templates are now in separate files in the templates/ directory
+# JWT Helper Functions
+def create_token(user_id, username):
+    payload = {
+        'user_id': user_id,
+        'username': username,
+        'exp': datetime.utcnow() + app.config['JWT_ACCESS_TOKEN_EXPIRES']
+    }
+    return jwt.encode(payload, app.config['JWT_SECRET_KEY'], algorithm='HS256')
+
+def verify_token(token):
+    try:
+        payload = jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        auth_header = request.headers.get('Authorization')
+        
+        if auth_header:
+            try:
+                token = auth_header.split(" ")[1]
+            except IndexError:
+                return jsonify({'message': 'Invalid token format'}), 401
+        
+        if not token:
+            return jsonify({'message': 'Token is missing'}), 401
+        
+        payload = verify_token(token)
+        if not payload:
+            return jsonify({'message': 'Invalid or expired token'}), 401
+        
+        request.current_user = payload
+        return f(*args, **kwargs)
+    
+    return decorated
 
 # API Routes
 @app.route('/check_auth')
+@token_required
 def check_auth():
-    if 'user_id' in session:
-        user = User.query.get(session['user_id'])
-        if user:
-            return jsonify({
-                'authenticated': True,
-                'username': user.username
-            })
-    return jsonify({'authenticated': False})
+    return jsonify({
+        'authenticated': True,
+        'username': request.current_user['username']
+    })
 
 @app.route('/login', methods=['POST'])
 def login():
-    if 'user_id' in session:
-        return jsonify({'status': 'success', 'message': 'Already logged in'})
-    
     username = request.form['username'].strip()
     password = request.form['password'].strip()
     
@@ -75,20 +111,21 @@ def login():
     if not user or not check_password_hash(user.password_hash, password):
         return jsonify({'status': 'error', 'message': 'Неверное имя пользователя или пароль'}), 401
     
-    session.permanent = True
-    session['user_id'] = user.id
-    session['username'] = user.username
     user.online = True
     user.last_seen = datetime.utcnow()
     db.session.commit()
     
-    return jsonify({'status': 'success', 'message': 'Login successful'})
+    token = create_token(user.id, user.username)
+    
+    return jsonify({
+        'status': 'success', 
+        'message': 'Login successful',
+        'token': token,
+        'username': user.username
+    })
 
 @app.route('/register', methods=['POST'])
 def register():
-    if 'user_id' in session:
-        return jsonify({'status': 'error', 'message': 'Already logged in'}), 400
-    
     username = request.form['username'].strip()
     password = request.form['password'].strip()
     confirm_password = request.form['confirm_password'].strip()
@@ -119,17 +156,15 @@ def register():
     return jsonify({'status': 'success', 'message': 'Регистрация прошла успешно! Теперь вы можете войти.'})
 
 @app.route('/send_message', methods=['POST'])
+@token_required
 def send_message():
-    if 'user_id' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authenticated'}), 401
-    
     data = request.get_json()
     if not data or 'content' not in data:
         return jsonify({'status': 'error', 'message': 'No content provided'}), 400
     
     new_message = Message(
         content=data['content'],
-        user_id=session['user_id'],
+        user_id=request.current_user['user_id'],
         timestamp=datetime.utcnow()
     )
     
@@ -139,17 +174,15 @@ def send_message():
     return jsonify({'status': 'success'})
 
 @app.route('/get_messages')
+@token_required
 def get_messages():
-    if 'user_id' not in session:
-        return jsonify({'status': 'error', 'message': 'Not authenticated'}), 401
-    
     messages = Message.query.order_by(Message.timestamp.asc()).all()
     
     messages_data = [{
         'id': msg.id,
         'content': msg.content,
         'timestamp': msg.timestamp.isoformat(),
-        'is_author': msg.user_id == session['user_id'],
+        'is_author': msg.user_id == request.current_user['user_id'],
         'is_read': msg.is_read,
         'username': msg.author.username
     } for msg in messages]
@@ -160,17 +193,24 @@ def get_messages():
     })
 
 @app.route('/logout')
+@token_required
 def logout():
-    if 'user_id' in session:
-        user = User.query.get(session['user_id'])
-        if user:
-            user.online = False
-            user.last_seen = datetime.utcnow()
-            db.session.commit()
-        
-        session.clear()
+    user = User.query.get(request.current_user['user_id'])
+    if user:
+        user.online = False
+        user.last_seen = datetime.utcnow()
+        db.session.commit()
     
     return jsonify({'status': 'success', 'message': 'Logged out successfully'})
+
+# Serve static files from Flask
+@app.route('/')
+def serve_index():
+    return app.send_static_file('index.html')
+
+@app.route('/<path:filename>')
+def serve_static(filename):
+    return app.send_static_file(filename)
 
 # Создаем папку для статических файлов, если её нет
 if not os.path.exists('static'):

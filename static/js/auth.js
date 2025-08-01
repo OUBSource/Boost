@@ -1,8 +1,20 @@
 // Authentication and navigation handling
 let currentUser = null;
+let authToken = null;
 
 // API base URL - change this to match your Flask server
 const API_BASE_URL = 'http://127.0.0.1:11436';
+
+// Helper function to get auth headers
+function getAuthHeaders() {
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+    if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    return headers;
+}
 
 // Show login form
 function showLogin() {
@@ -60,13 +72,14 @@ document.getElementById('login-form-element').addEventListener('submit', async f
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-            credentials: 'include'
+            body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
         });
         
         if (response.ok) {
-            // Login successful
-            currentUser = { username: username };
+            const data = await response.json();
+            // Store the JWT token
+            authToken = data.token;
+            currentUser = { username: data.username };
             showChat();
             loadMessages(); // Start loading messages
         } else {
@@ -136,13 +149,14 @@ async function logout() {
     try {
         await fetch(`${API_BASE_URL}/logout`, {
             method: 'GET',
-            credentials: 'include'
+            headers: getAuthHeaders()
         });
     } catch (error) {
         console.error('Logout error:', error);
     }
     
     currentUser = null;
+    authToken = null;
     showLogin();
     clearAlerts();
 }
@@ -155,26 +169,8 @@ function loadChat() {
 
 // Check authentication status on page load
 async function checkAuthStatus() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/check_auth`, {
-            method: 'GET',
-            credentials: 'include'
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.authenticated) {
-                currentUser = { username: data.username };
-                showChat();
-                loadMessages();
-                return;
-            }
-        }
-    } catch (error) {
-        console.error('Auth check error:', error);
-    }
-    
-    // Default to login form
+    // For JWT, we don't have a persistent token on page load
+    // So we'll just show the login form
     showLogin();
 }
 

@@ -50,7 +50,9 @@ function addMessage(message, isAuthor) {
 
 // Загрузка сообщений
 function loadMessages() {
-    fetch(`${API_BASE_URL}/get_messages`)
+    fetch(`${API_BASE_URL}/get_messages`, {
+        headers: getAuthHeaders()
+    })
         .then(response => response.json())
         .then(data => {
             if (data.messages && data.messages.length > 0) {
@@ -75,11 +77,8 @@ function sendMessage() {
     if (message) {
         fetch(`${API_BASE_URL}/send_message`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ content: message }),
-            credentials: 'include'
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ content: message })
         }).then(response => {
             if (response.ok) {
                 input.value = '';
