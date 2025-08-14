@@ -1,0 +1,33 @@
+services:
+  main:
+    build: backend
+    ports:
+      - "8300:8300"
+    develop:
+      watch:
+        - action: sync+restart
+          path: backend
+          target: /app
+        - action: rebuild
+          path: ./requirements.txt
+    volumes:
+      - data:/app/instance
+  vite:
+    profiles:
+      - dev
+    build: frontend
+    ports:
+      - "8301:8301"
+    volumes:
+      - vite_cache:/app/.vite
+    develop:
+      watch:
+        - action: sync
+          path: frontend
+          target: /app
+        - action: rebuild
+          path: frontend/package.json
+
+volumes:
+  data:
+  vite_cache:
