@@ -1,13 +1,15 @@
-// Authentication and navigation handling
-let currentUser = null;
-let authToken = null;
+import { loadMessages } from "./main";
+import type { Headers, ErrorResponse, User, LoginResponse } from "./types";
+import { API_BASE_URL } from "./config";
 
-// API base URL - change this to match your Flask server
-const API_BASE_URL = 'http://127.0.0.1:11436';
+// Authentication and navigation handling
+export let currentUser: User | null = null;
+let authToken: string | null = null;
+
 
 // Helper function to get auth headers
-function getAuthHeaders() {
-    const headers = {
+export function getAuthHeaders(): Headers {
+    const headers: Headers = {
         'Content-Type': 'application/json',
     };
     if (authToken) {
@@ -17,37 +19,37 @@ function getAuthHeaders() {
 }
 
 // Show login form
-function showLogin() {
-    document.getElementById('login-form').style.display = 'flex';
-    document.getElementById('register-form').style.display = 'none';
-    document.getElementById('chat-interface').style.display = 'none';
+export function showLogin() {
+    document.getElementById('login-form')!.style.display = 'flex';
+    document.getElementById('register-form')!.style.display = 'none';
+    document.getElementById('chat-interface')!.style.display = 'none';
     clearAlerts();
 }
 
 // Show register form
-function showRegister() {
-    document.getElementById('login-form').style.display = 'none';
-    document.getElementById('register-form').style.display = 'flex';
-    document.getElementById('chat-interface').style.display = 'none';
+export function showRegister() {
+    document.getElementById('login-form')!.style.display = 'none';
+    document.getElementById('register-form')!.style.display = 'flex';
+    document.getElementById('chat-interface')!.style.display = 'none';
     clearAlerts();
 }
 
 // Show chat interface
-function showChat() {
-    document.getElementById('login-form').style.display = 'none';
-    document.getElementById('register-form').style.display = 'none';
-    document.getElementById('chat-interface').style.display = 'block';
+export function showChat() {
+    document.getElementById('login-form')!.style.display = 'none';
+    document.getElementById('register-form')!.style.display = 'none';
+    document.getElementById('chat-interface')!.style.display = 'block';
 }
 
 // Clear all alerts
-function clearAlerts() {
-    document.getElementById('login-alerts').innerHTML = '';
-    document.getElementById('register-alerts').innerHTML = '';
+export function clearAlerts() {
+    document.getElementById('login-alerts')!.innerHTML = '';
+    document.getElementById('register-alerts')!.innerHTML = '';
 }
 
 // Show alert message
-function showAlert(containerId, message, type = 'danger') {
-    const container = document.getElementById(containerId);
+export function showAlert(containerId: string, message: string, type: "success" | "danger" = 'danger') {
+    const container = document.getElementById(containerId)!;
     const alertDiv = document.createElement('div');
     alertDiv.className = `alert alert-${type}`;
     alertDiv.textContent = message;
@@ -55,11 +57,14 @@ function showAlert(containerId, message, type = 'danger') {
 }
 
 // Handle login form submission
-document.getElementById('login-form-element').addEventListener('submit', async function(e) {
+document.getElementById('login-form-element')!.addEventListener('submit', async function(e) {
     e.preventDefault();
+
+    const usernameElement = document.getElementById('login-username') as HTMLInputElement;
+    const passwordElement = document.getElementById('login-password') as HTMLInputElement;
     
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value.trim();
+    const username = usernameElement.value.trim();
+    const password = passwordElement.value.trim();
     
     if (!username || !password) {
         showAlert('login-alerts', 'Пожалуйста, заполните все поля', 'danger');
@@ -76,7 +81,7 @@ document.getElementById('login-form-element').addEventListener('submit', async f
         });
         
         if (response.ok) {
-            const data = await response.json();
+            const data: LoginResponse = await response.json();
             // Store the JWT token
             authToken = data.token;
             currentUser = { username: data.username };
@@ -92,12 +97,16 @@ document.getElementById('login-form-element').addEventListener('submit', async f
 });
 
 // Handle register form submission
-document.getElementById('register-form-element').addEventListener('submit', async function(e) {
+document.getElementById('register-form-element')!.addEventListener('submit', async function(e) {
     e.preventDefault();
+
+    const usernameElement = document.getElementById('register-username') as HTMLInputElement;
+    const passwordElement = document.getElementById('register-password') as HTMLInputElement;
+    const confirmPasswordElement = document.getElementById('register-confirm-password') as HTMLInputElement;
     
-    const username = document.getElementById('register-username').value.trim();
-    const password = document.getElementById('register-password').value.trim();
-    const confirmPassword = document.getElementById('register-confirm-password').value.trim();
+    const username = usernameElement.value.trim();
+    const password = passwordElement.value.trim();
+    const confirmPassword = confirmPasswordElement.value.trim();
     
     if (!username || !password || !confirmPassword) {
         showAlert('register-alerts', 'Пожалуйста, заполните все поля', 'danger');
@@ -136,7 +145,7 @@ document.getElementById('register-form-element').addEventListener('submit', asyn
                 showLogin();
             }, 2000);
         } else {
-            const data = await response.json();
+            const data: ErrorResponse = await response.json();
             showAlert('register-alerts', data.message || 'Ошибка при регистрации', 'danger');
         }
     } catch (error) {
@@ -145,7 +154,7 @@ document.getElementById('register-form-element').addEventListener('submit', asyn
 });
 
 // Handle logout
-async function logout() {
+export async function logout() {
     try {
         await fetch(`${API_BASE_URL}/logout`, {
             method: 'GET',
@@ -162,19 +171,14 @@ async function logout() {
 }
 
 // Load chat interface
-function loadChat() {
+export function loadChat() {
     showChat();
     loadMessages();
 }
 
 // Check authentication status on page load
-async function checkAuthStatus() {
+export async function checkAuthStatus() {
     // For JWT, we don't have a persistent token on page load
     // So we'll just show the login form
     showLogin();
 }
-
-// Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
-    checkAuthStatus();
-}); 
