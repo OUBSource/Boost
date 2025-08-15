@@ -102,21 +102,10 @@ export function sendMessage() {
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', function() {
     // Настройка отправки сообщений
-    const messageForm = document.getElementById('message-form');
-    if (messageForm) {
-        messageForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            sendMessage();
-        });
-        
-        // Также отправка по нажатию Enter
-        const messageInput = document.getElementById('message-input')!;
-        messageInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-    }
+    document.getElementById('message-form')!.addEventListener('submit', (e) => {
+        e.preventDefault();
+        sendMessage();
+    });
 
     // Проверка новых сообщений каждые 2 секунды (only when chat is visible)
     setInterval(() => {
