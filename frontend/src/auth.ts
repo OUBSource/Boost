@@ -1,5 +1,5 @@
 import { loadMessages } from "./main";
-import type { Headers, ErrorResponse, User, LoginResponse } from "./types";
+import type { Headers, ErrorResponse, User, LoginResponse, LoginRequest, RegisterRequest } from "./types";
 import { API_BASE_URL } from "./config";
 
 // Authentication and navigation handling
@@ -57,7 +57,7 @@ export function showAlert(containerId: string, message: string, type: "success" 
 }
 
 // Handle login form submission
-document.getElementById('login-form-element')!.addEventListener('submit', async function(e) {
+document.getElementById('login-form-element')!.addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const usernameElement = document.getElementById('login-username') as HTMLInputElement;
@@ -72,12 +72,17 @@ document.getElementById('login-form-element')!.addEventListener('submit', async 
     }
     
     try {
+        const request: LoginRequest = {
+            username: username,
+            password: password
+        }
+
         const response = await fetch(`${API_BASE_URL}/login`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Type': 'application/json',
             },
-            body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
+            body: JSON.stringify(request)
         });
         
         if (response.ok) {
@@ -88,7 +93,7 @@ document.getElementById('login-form-element')!.addEventListener('submit', async 
             showChat();
             loadMessages(); // Start loading messages
         } else {
-            const data = await response.json();
+            const data: ErrorResponse = await response.json();
             showAlert('login-alerts', data.message || 'Неверное имя пользователя или пароль', 'danger');
         }
     } catch (error) {
@@ -97,7 +102,7 @@ document.getElementById('login-form-element')!.addEventListener('submit', async 
 });
 
 // Handle register form submission
-document.getElementById('register-form-element')!.addEventListener('submit', async function(e) {
+document.getElementById('register-form-element')!.addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const usernameElement = document.getElementById('register-username') as HTMLInputElement;
@@ -129,13 +134,18 @@ document.getElementById('register-form-element')!.addEventListener('submit', asy
     }
     
     try {
+        const request: RegisterRequest = {
+            username: username,
+            password: password,
+            confirm_password: confirmPassword
+        }
+
         const response = await fetch(`${API_BASE_URL}/register`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Type': 'application/json',
             },
-            body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&confirm_password=${encodeURIComponent(confirmPassword)}`,
-            credentials: 'include'
+            body: JSON.stringify(request)
         });
         
         if (response.ok) {

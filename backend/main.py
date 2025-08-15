@@ -1,224 +1,321 @@
-import os
-import re
-import jwt
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship, Session
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
+import jwt
+import re
+from typing import Optional
+from pydantic import BaseModel
+import bcrypt
 
-# Инициализация приложения
-app = Flask(__name__)
-CORS(app, supports_credentials=True)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///boost_messenger.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'boost-messenger-jwt-secret-2024'
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
+# Настройки приложения
+DATABASE_URL = "sqlite:///./boost_messenger.db"
+JWT_SECRET_KEY = "boost-messenger-jwt-secret-2024"
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-db = SQLAlchemy(app)
+# Инициализация FastAPI
+app = FastAPI(title="Boost Messenger API")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # В продакшене замените на нужные домены
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Настройка базы данных
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
 
 # Модели базы данных
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200), nullable=False)
-    online = db.Column(db.Boolean, default=False)
-    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    messages = db.relationship('Message', backref='author', lazy=True)
+class User(Base):
+    __tablename__ = "user"
 
-class Message(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    content = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    is_read = db.Column(db.Boolean, default=False)
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash = Column(String(200), nullable=False)
+    online = Column(Boolean, default=False)
+    last_seen = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    messages = relationship("Message", back_populates="author", lazy="select")
+
+
+class Message(Base):
+    __tablename__ = "message"
+
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
+    is_read = Column(Boolean, default=False)
+
+    author = relationship("User", back_populates="messages")
+
 
 # Валидация данных
-def is_valid_username(username):
+def is_valid_username(username: str) -> bool:
     if len(username) < 3 or len(username) > 20:
         return False
     if re.search(r'[\s\u180E\u200B-\u200D\u2060\uFEFF]', username):
         return False
     return True
 
-def is_valid_password(password):
+
+def is_valid_password(password: str) -> bool:
     if len(password) < 5 or len(password) > 50:
         return False
     if re.search(r'[\s\u180E\u200B-\u200D\u2060\uFEFF]', password):
         return False
     return True
 
-# JWT Helper Functions
-def create_token(user_id, username):
-    payload = {
-        'user_id': user_id,
-        'username': username,
-        'exp': datetime.utcnow() + app.config['JWT_ACCESS_TOKEN_EXPIRES']
-    }
-    return jwt.encode(payload, app.config['JWT_SECRET_KEY'], algorithm='HS256')
 
-def verify_token(token):
+# JWT Helper Functions
+def create_token(user_id: int, username: str) -> str:
+    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "exp": expire
+    }
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def verify_token(token: str) -> Optional[dict]:
     try:
-        payload = jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
         return None
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-        auth_header = request.headers.get('Authorization')
-        
-        if auth_header:
-            try:
-                token = auth_header.split(" ")[1]
-            except IndexError:
-                return jsonify({'message': 'Invalid token format'}), 401
-        
-        if not token:
-            return jsonify({'message': 'Token is missing'}), 401
-        
-        payload = verify_token(token)
-        if not payload:
-            return jsonify({'message': 'Invalid or expired token'}), 401
-        
-        request.current_user = payload
-        return f(*args, **kwargs)
-    
-    return decorated
 
-# API Routes
-@app.route('/check_auth')
-@token_required
-def check_auth():
-    return jsonify({
-        'authenticated': True,
-        'username': request.current_user['username']
-    })
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
-@app.route('/login', methods=['POST'])
-def login():
-    username = request.form['username'].strip()
-    password = request.form['password'].strip()
-    
-    user = User.query.filter_by(username=username).first()
-    
-    if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({'status': 'error', 'message': 'Неверное имя пользователя или пароль'}), 401
-    
+def get_password_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+# Security для FastAPI
+security = HTTPBearer()
+
+
+# Зависимость для получения текущего пользователя
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(lambda: SessionLocal())
+):
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.id == payload["user_id"]).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return {"user_id": user.id, "username": user.username}
+
+
+# Зависимость для получения сессии БД
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# Pydantic модели
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    confirm_password: str
+
+
+class SendMessageRequest(BaseModel):
+    content: str
+
+
+class MessageResponse(BaseModel):
+    id: int
+    content: str
+    timestamp: datetime
+    is_author: bool
+    is_read: bool
+    username: str
+
+    class Config:
+        from_attributes = True
+
+
+# Создание таблиц
+Base.metadata.create_all(bind=engine)
+
+
+# API маршруты
+@app.get("/check_auth")
+def check_auth(current_user: dict = Depends(get_current_user)):
+    return {
+        "authenticated": True,
+        "username": current_user["username"]
+    }
+
+
+@app.post("/login")
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == request.username.strip()).first()
+
+    if not user or not verify_password(request.password.strip(), user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверное имя пользователя или пароль"
+        )
+
     user.online = True
     user.last_seen = datetime.now()
-    db.session.commit()
-    
-    token = create_token(user.id, user.username)
-    
-    return jsonify({
-        'status': 'success', 
-        'message': 'Login successful',
-        'token': token,
-        'username': user.username
-    })
+    db.commit()
 
-@app.route('/register', methods=['POST'])
-def register():
-    username = request.form['username'].strip()
-    password = request.form['password'].strip()
-    confirm_password = request.form['confirm_password'].strip()
-    
+    token = create_token(user.id, user.username)
+
+    return {
+        "status": "success",
+        "message": "Login successful",
+        "token": token,
+        "username": user.username
+    }
+
+
+@app.post("/register")
+def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    username = request.username.strip()
+    password = request.password.strip()
+    confirm_password = request.confirm_password.strip()
+
     if not is_valid_username(username):
-        return jsonify({'status': 'error', 'message': 'Имя пользователя должно быть от 3 до 20 символов и не содержать пробелов'}), 400
-    
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Имя пользователя должно быть от 3 до 20 символов и не содержать пробелов"
+        )
+
     if not is_valid_password(password):
-        return jsonify({'status': 'error', 'message': 'Пароль должен быть от 5 до 50 символов и не содержать пробелов'}), 400
-    
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Пароль должен быть от 5 до 50 символов и не содержать пробелов"
+        )
+
     if password != confirm_password:
-        return jsonify({'status': 'error', 'message': 'Пароли не совпадают'}), 400
-    
-    existing_user = User.query.filter_by(username=username).first()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Пароли не совпадают"
+        )
+
+    existing_user = db.query(User).filter(User.username == username).first()
     if existing_user:
-        return jsonify({'status': 'error', 'message': 'Это имя пользователя уже занято'}), 400
-    
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Это имя пользователя уже занято"
+        )
+
+    hashed_password = get_password_hash(password)
     new_user = User(
         username=username,
-        password_hash=generate_password_hash(password),
+        password_hash=hashed_password,
         online=True,
         last_seen=datetime.now()
     )
-    
-    db.session.add(new_user)
-    db.session.commit()
-    
-    return jsonify({'status': 'success', 'message': 'Регистрация прошла успешно! Теперь вы можете войти.'})
 
-@app.route('/send_message', methods=['POST'])
-@token_required
-def send_message():
-    data = request.get_json()
-    if not data or 'content' not in data:
-        return jsonify({'status': 'error', 'message': 'No content provided'}), 400
-    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return {
+        "status": "success",
+        "message": "Регистрация прошла успешно Теперь вы можете войти."
+    }
+
+
+@app.post("/send_message")
+def send_message(
+    request: SendMessageRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not request.content.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No content provided"
+        )
+
     new_message = Message(
-        content=data['content'],
-        user_id=request.current_user['user_id'],
-        timestamp=datetime.utcnow()
+        content=request.content.strip(),
+        user_id=current_user["user_id"],
+        timestamp=datetime.now()
     )
-    
-    db.session.add(new_message)
-    db.session.commit()
-    
-    return jsonify({'status': 'success'})
 
-@app.route('/get_messages')
-@token_required
-def get_messages():
-    messages = Message.query.order_by(Message.timestamp.asc()).all()
-    
-    messages_data = [{
-        'id': msg.id,
-        'content': msg.content,
-        'timestamp': msg.timestamp.isoformat(),
-        'is_author': msg.user_id == request.current_user['user_id'],
-        'is_read': msg.is_read,
-        'username': msg.author.username
-    } for msg in messages]
-    
-    return jsonify({
-        'status': 'success',
-        'messages': messages_data
-    })
+    db.add(new_message)
+    db.commit()
+    db.refresh(new_message)
 
-@app.route('/logout')
-@token_required
-def logout():
-    user = User.query.get(request.current_user['user_id'])
+    return {"status": "success"}
+
+
+@app.get("/get_messages")
+def get_messages(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    messages = db.query(Message).order_by(Message.timestamp.asc()).all()
+
+    messages_data = []
+    for msg in messages:
+        messages_data.append({
+            "id": msg.id,
+            "content": msg.content,
+            "timestamp": msg.timestamp.isoformat(),
+            "is_author": msg.user_id == current_user["user_id"],
+            "is_read": msg.is_read,
+            "username": msg.author.username
+        })
+
+    return {
+        "status": "success",
+        "messages": messages_data
+    }
+
+
+@app.get("/logout")
+def logout(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == current_user["user_id"]).first()
     if user:
         user.online = False
-        user.last_seen = datetime.utcnow()
-        db.session.commit()
-    
-    return jsonify({'status': 'success', 'message': 'Logged out successfully'})
+        user.last_seen = datetime.now()
+        db.commit()
 
-# Serve static files from Flask
-@app.route('/')
-def serve_index():
-    return app.send_static_file('index.html')
-
-@app.route('/<path:filename>')
-def serve_static(filename):
-    return app.send_static_file(filename)
-
-# Создаем папку для статических файлов, если её нет
-if not os.path.exists('static'):
-    os.makedirs('static')
-
-# Инициализация базы данных
-with app.app_context():
-    db.create_all()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8300, debug=True)
+    return {
+        "status": "success",
+        "message": "Logged out successfully"
+    }

@@ -23,6 +23,24 @@ export interface User {
     username: string;
 }
 
+
+// ----------
+// API models
+// ----------
+
+// Requests
+export interface LoginRequest {
+    username: string;
+    password: string;
+}
+
+export interface RegisterRequest {
+    username: string;
+    password: string;
+    confirm_password: string;
+}
+
+// Responses
 export interface LoginResponse {
     username: string;
     token: string;
