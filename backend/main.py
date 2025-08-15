@@ -112,7 +112,7 @@ def login():
         return jsonify({'status': 'error', 'message': 'Неверное имя пользователя или пароль'}), 401
     
     user.online = True
-    user.last_seen = datetime.utcnow()
+    user.last_seen = datetime.now()
     db.session.commit()
     
     token = create_token(user.id, user.username)
@@ -147,7 +147,7 @@ def register():
         username=username,
         password_hash=generate_password_hash(password),
         online=True,
-        last_seen=datetime.utcnow()
+        last_seen=datetime.now()
     )
     
     db.session.add(new_user)
@@ -221,4 +221,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8300)
+    app.run(host='0.0.0.0', port=8300, debug=True)
