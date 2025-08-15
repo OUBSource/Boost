@@ -1,4 +1,4 @@
-import './style.css';
+import './css/style.scss';
 import { showLogin, getAuthHeaders } from './auth';
 import { API_BASE_URL } from './config';
 import type { Message, Messages } from './types';
